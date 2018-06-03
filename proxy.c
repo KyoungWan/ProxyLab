@@ -85,6 +85,7 @@ void handle_request(int fd)
     print_headers();
     memset(&buf[0], 0, sizeof(buf)); //flushing buffer
   }
+  free_line_header(line, root);
   return;
 }
 
@@ -119,6 +120,7 @@ void parse_header(request_header* header, char *buf)
       last->next = header;
     }
   printf("name: %s data: %s\n", header->name, header->data);
+  free(last);
 }
 
 request_header* last_node() {
@@ -141,4 +143,19 @@ void print_headers() {
   }
   printf("=====print_headers end======\n");
   printf("\n");
+}
+void free_line_header(request_line* line, request_header* root) {
+  //free header
+  request_header* current = root;
+  request_header* temp = root;
+  if(current){
+    while(current->next){
+      temp = current->next;
+      free(current);
+      current = temp;
+    }
+    free(current);
+  }
+  //free line
+  free(line);
 }
