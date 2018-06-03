@@ -23,7 +23,7 @@ int main(int argc, char **argv)
   }
   port  = argv[1];
   printf("port :%s\n", port);
-  listenfd = Open_listenfd(port); //open socket && port and listen
+  listenfd = Open_listenfd(port); //Open_listenfd => socket(), bind(), listen()
 
   while(1)
   {
@@ -37,6 +37,10 @@ int main(int argc, char **argv)
 
 void handle_request(int fd)
 {
+  while(1)
+  {
+
   printf("fd :%d \n", fd);
+  }
   return;
 }
