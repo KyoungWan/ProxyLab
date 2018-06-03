@@ -24,8 +24,10 @@ static request_header *root= NULL;
 void handle_request(int);
 void parse_line(request_line *, char*);
 void parse_header(request_header *, char*);
-request_header* last_node();
+request_header* last_header();
 void print_headers();
+void insert_header(request_header*);
+request_header* find_header_by_key(char*);
 
 int main(int argc, char **argv)
 
@@ -83,17 +85,103 @@ void handle_request(int fd)
     request_header* header=malloc(sizeof(header));
     parse_header(header, buf);
     print_headers();
+    make_header(line);
     memset(&buf[0], 0, sizeof(buf)); //flushing buffer
   }
   free_line_header(line, root);
   return;
 }
+void make_header(request_line* line)
+{
+  request_header* temp=NULL;
+
+  temp = find_header_by_key("Host");
+  if(!temp){
+    request_header* new_header=malloc(sizeof(request_header*));
+    strcpy(new_header->name, "Host");
+    strcpy(new_header->data, line->uri);//TODO: URI로부터 host추출하기
+    insert_header(new_header);
+    temp=NULL;
+  }
+
+  temp = find_header_by_key("User-Agent");
+  if(!temp){
+    request_header* new_header=malloc(sizeof(request_header*));
+    strcpy(new_header->name, "User-Agent");
+    strcpy(new_header->data, user_agent_hdr);
+    insert_header(new_header);
+    temp=NULL;
+  }
+
+  temp = find_header_by_key("Connection");
+  if(!temp){
+    request_header* new_header=malloc(sizeof(request_header*));
+    strcpy(new_header->name, "Connection");
+    strcpy(new_header->data, "close");
+    insert_header(new_header);
+    temp=NULL;
+  }
+
+  temp = find_header_by_key("Proxy-Connection");
+  if(!temp){
+    request_header* new_header=malloc(sizeof(request_header*));
+    strcpy(new_header->name, "Proxy-Connection");
+    strcpy(new_header->data, "close");
+    insert_header(new_header);
+    temp=NULL;
+  }
+
+  //1.headers를 돌면서 HOSTㄹ인 헤더ㄹ를 찾아라 찾아서 Host에 넣어주기
+  //2.없으면 URi에서 뜯어라
+  //3.single line으로 USer-Agent header 보내주기
+  //4.Connection: close
+  //5.Proxy-Connection: close 헤더를 포함해라.
+}
+
+request_header* find_header_by_key(char* type)
+{
+  // Host, User-Agent, Connection, Proxy-Connection
+  request_header* temp=malloc(sizeof(request_header*));
+  temp = root;
+  while(temp){
+    if(strcmp(temp->name, type)==0) {
+      return temp;
+    }
+    else {
+      temp = temp->next;
+    }
+  }
+  free(temp);
+  return NULL;
+}
+
+void insert_header(request_header *header) {
+  request_header* last=NULL;
+  if(!root) {
+    root = header;
+  }else {
+    last = last_header();
+    last->next = header;
+  }
+}
+
 
 void parse_line(request_line* line, char* buf)
 {
+  char method[10];
+  char uri[1500];
+  char version[100];
+  //TODO: fix for error handling
   sscanf(buf, "%s %s %s\n", line->method, line->uri, line->version);
+  strcpy(method, line->method);
+  strcpy(uri, line->uri);
+  strcpy(version, line->version);
 
-  printf("enter parse_line\n");
+  if(strcmp("GET", method) !=0){
+    printf("Only GET method can be accepted\n");
+    return ; //TODO: error handling 
+  }
+
   printf("method: %s uri: %s version: %s\n", line->method, line->uri, line->version);
   //buf: GET http://www.example.com HTTP/1.0
 }
@@ -113,17 +201,20 @@ void parse_header(request_header* header, char *buf)
       //bad header format
       printf("bad header format error\n");
     }
+    insert_header(header);
+/*
     if(!root) {
       root = header;
     } else {
-      last = last_node();
+      last = last_header();
       last->next = header;
     }
+    */
   printf("name: %s data: %s\n", header->name, header->data);
   free(last);
 }
 
-request_header* last_node() {
+request_header* last_header() {
   request_header* temp = malloc(sizeof(request_header*));
   temp = root;
   while(temp && temp->next){
