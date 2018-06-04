@@ -79,15 +79,18 @@ void handle_request(int fd)
   memset(&buf[0], 0, sizeof(buf)); //flushing buffer
 
   //read all header
+  Rio_readlineb(&rio, buf, MAXLINE);
   while(strcmp(buf, "\r\n"))
   {
-    Rio_readlineb(&rio, buf, MAXLINE);
+    printf("while buf : %s\n", buf);
     request_header* header=malloc(sizeof(header));
     parse_header(header, buf);
-    print_headers();
-    make_header(line);
     memset(&buf[0], 0, sizeof(buf)); //flushing buffer
+    Rio_readlineb(&rio, buf, MAXLINE);
   }
+  printf("test\n");
+  make_header(line);
+  print_headers();
   free_line_header(line, root);
   return;
 }
@@ -189,6 +192,8 @@ void parse_line(request_line* line, char* buf)
 void parse_header(request_header* header, char *buf)
 {
   printf("enter parse_header\n");
+  printf("buf : %s\n",buf);
+
     char* name= strstr(buf, ": ");
     char* data= strstr(buf, "\r\n");
     request_header* last=NULL;
