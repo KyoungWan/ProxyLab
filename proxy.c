@@ -26,12 +26,14 @@ static const char *user_agent_hdr = "User-Agent: Mozilla/5.0 (X11; Linux x86_64;
 static request_header *root= NULL;
 void handle_request(int);
 void parse_line(request_line *, char*);
-void parse_header(request_header *, char*, request_line*);//todo remove request_line*
+void parse_header(char*, request_line*);//todo remove request_line*
 request_header* last_header();
 void print_headers();
 void insert_header(request_header*);
-request_header* find_header_by_key(char*);
+int find_header_by_key(char*);
 void print_line(request_line*);
+void send_request(request_line*);
+void make_header(request_line*);
 
 int main(int argc, char **argv)
 
@@ -69,7 +71,7 @@ int main(int argc, char **argv)
 
 void handle_request(int fd)
 {
-  request_line* line=malloc(sizeof(line));
+  request_line* line=malloc(sizeof(request_line));
   //open rio of client input
   rio_t rio;
   char buf[MAXLINE];
@@ -84,62 +86,97 @@ void handle_request(int fd)
 
   //read all header
   Rio_readlineb(&rio, buf, MAXLINE);
-  print_line(line);
   while(strcmp(buf, "\r\n"))
   {
     printf("while buf : %s\n", buf);
-    parse_header(NULL, buf, line);
+    parse_header(buf, line);
     print_line(line);
     memset(&buf[0], 0, sizeof(buf)); //flushing buffer
     Rio_readlineb(&rio, buf, MAXLINE);
   }
-    memset(&buf[0], 0, sizeof(buf)); //flushing buffer
-  print_line(line);
+  memset(&buf[0], 0, sizeof(buf)); //flushing buffer
   make_header(line);
   printf("/////////////final state/////////////\n");
   print_line(line);
   print_headers();
+  send_request(line);
   free_line_header(line, root);
   return;
+}
+void send_request(request_line* line)
+{
+  print_line(line);
+  int request_port=80;
+  char request_domain[200];
+  char* pport = NULL;
+  int requestfd;
+  char request_buf[10000];
+  request_header *header;
+
+  strcpy(request_domain, line->hostname);
+  pport = strstr(request_domain, ":");
+  if(pport){
+    request_port= atoi(pport+1);
+    *pport = "\0";
+  }
+  //open request file descriptor
+  printf("request_domain: %s, request_port %d\n", request_domain, request_port);
+  requestfd= Open_clientfd(request_domain, &request_port);
+
+  //make request
+  strcat(request_buf, line->method);
+  strcat(request_buf, " ");
+  strcat(request_buf, line->path);
+  strcat(request_buf, " ");
+  strcat(request_buf, "HTTP/1.0\r\n");
+  header = root;
+  while(header)
+  {
+    strcat(request_buf, header->name);
+    strcat(request_buf, ": ");
+    strcat(request_buf, header->data);
+    strcat(request_buf, "\r\n");
+    header = header->next;
+  }
+  strcat(request_buf, "\r\n");
+  //send request
+  Rio_writen(requestfd, request_buf, strlen(request_buf));
 }
 void make_header(request_line* line)
 {
   request_header* temp=NULL;
+  int find=0;
 
-  temp = find_header_by_key("Host");
-  if(!temp){
-    request_header* new_header=malloc(sizeof(request_header*));
+  find = find_header_by_key("Host");
+  if(!find){
+    request_header* new_header=malloc(sizeof(request_header));
     strcpy(new_header->name, "Host");
-    strcpy(new_header->data, line->hostname);//TODO: URI로부터 host추출하기
+    strcpy(new_header->data, line->hostname);
     insert_header(new_header);
-    temp=NULL;
   }
 
-  temp = find_header_by_key("User-Agent");
-  if(!temp){
-    request_header* new_header=malloc(sizeof(request_header*));
+  find= find_header_by_key("User-Agent");
+  if(!find){
+    request_header* new_header=malloc(sizeof(request_header));
     strcpy(new_header->name, "User-Agent");
     strcpy(new_header->data, user_agent_hdr);
     insert_header(new_header);
-    temp=NULL;
   }
 
-  temp = find_header_by_key("Connection");
-  if(!temp){
-    request_header* new_header=malloc(sizeof(request_header*));
+  find= find_header_by_key("Connection");
+  if(!find){
+    request_header* new_header=malloc(sizeof(request_header));
     strcpy(new_header->name, "Connection");
     strcpy(new_header->data, "close");
     insert_header(new_header);
-    temp=NULL;
   }
 
-  temp = find_header_by_key("Proxy-Connection");
-  if(!temp){
-    request_header* new_header=malloc(sizeof(request_header*));
+  find= find_header_by_key("Proxy-Connection");
+  if(!find){
+    request_header* new_header=malloc(sizeof(request_header));
     strcpy(new_header->name, "Proxy-Connection");
     strcpy(new_header->data, "close");
     insert_header(new_header);
-    temp=NULL;
   }
 
   //1.headers를 돌면서 HOSTㄹ인 헤더ㄹ를 찾아라 찾아서 Host에 넣어주기
@@ -149,21 +186,20 @@ void make_header(request_line* line)
   //5.Proxy-Connection: close 헤더를 포함해라.
 }
 
-request_header* find_header_by_key(char* type)
+int find_header_by_key(char* type)
 {
   // Host, User-Agent, Connection, Proxy-Connection
-  request_header* temp=malloc(sizeof(request_header*));
+  request_header* temp;
   temp = root;
   while(temp){
     if(strcmp(temp->name, type)==0) {
-      return temp;
+      return 1;
     }
     else {
       temp = temp->next;
     }
   }
-  free(temp);
-  return NULL;
+  return 0;
 }
 
 void insert_header(request_header *header) {
@@ -213,7 +249,8 @@ void parse_line(request_line* line, char* buf)
     strcpy(line->path, "/");
   } else {
     //URL has hostname && path
-    memcpy(line->hostname, host_start, path_start-host_start); //strcpy_s is only for windows
+    //memcpy(line->hostname, host_start, path_start-host_start); //strcpy_s is only for windows
+    strncpy(line->hostname, host_start, path_start-host_start); //strcpy_s is only for windows
     strcpy(line->path, path_start);
   }
 
@@ -223,27 +260,29 @@ void parse_line(request_line* line, char* buf)
   }
 
   printf("method: %s uri: %s version: %s\n", line->method, line->uri, line->version);
+  printf("hostname: %s path: %s\n", line->hostname, line->path);
   //buf: GET http://www.example.com HTTP/1.0
 }
 
-void parse_header(request_header* nouse, char *buf, request_line* line)
+void parse_header(char *buf, request_line* line)
 {
   request_header* header = malloc(sizeof(request_header));
   char* pname= strstr(buf, ": ");
   char* pdata= strstr(buf, "\r\n");
+  if((!pname)||(!pdata))
+  {
+    //bad header format
+    printf("bad header format error\n");
+    return;
+  }
   request_header* last=NULL;
   //TODO: handling error during memcpy, ex. HOST:::::123
-    memcpy(header->name, buf, pname-buf);
-    print_line(line);
+  //memcpy(header->name, buf, pname-buf);
+  strncpy(header->name, buf, pname-buf);
   //아래줄을 실행하면 line의 uri가 깨지는 버그가 있다..
-   memcpy(header->data, pname+2, pdata-pname-2);
-    print_line(line);
-    if((!pname)||(!pdata))
-    {
-      //bad header format
-      printf("bad header format error\n");
-    }
-    insert_header(header);
+  //memcpy(header->data, pname+2, pdata-pname-2);
+  strncpy(header->data, pname+2, pdata-pname-2);
+  insert_header(header);
   printf("name: %s data: %s\n", header->name, header->data);
 }
 
@@ -270,6 +309,7 @@ void print_headers() {
 }
 void print_line(request_line* line){
   printf("=====print_line start====\n");
+  printf("line: %p\n", line);
   printf("method: %s\n", line->method);
   printf("uri: %s\n", line->uri);
   printf("hostname: %s\n", line->hostname);
