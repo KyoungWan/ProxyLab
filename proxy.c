@@ -1,3 +1,4 @@
+#include <string.h>
 #include <stdio.h>
 #include "csapp.h"
 
@@ -9,6 +10,8 @@ typedef struct
 {
   char method[MAXLINE];
   char uri[MAXLINE];
+  char hostname[MAXLINE];
+  char path[MAXLINE];
   char version[MAXLINE];
 } request_line;
 typedef struct
@@ -28,6 +31,7 @@ request_header* last_header();
 void print_headers();
 void insert_header(request_header*);
 request_header* find_header_by_key(char*);
+void print_line(request_line*);
 
 int main(int argc, char **argv)
 
@@ -70,12 +74,14 @@ void handle_request(int fd)
   rio_t rio;
   char buf[MAXLINE];
   size_t n;
-  //void Rio_readinitb(rio_t *rp, int fd)
+
   Rio_readinitb(&rio, fd);
   //read line
-  n = Rio_readlineb(&rio, buf, MAXLINE);
-  printf("server received %d bytes\n", n);
+  n = Rio_readlineb(&rio, buf, MAXLINE); //printf("server received %d bytes\n", n);
+  printf("line test\n");
   parse_line(line, buf);
+  printf("line test\n");
+  print_line(line);
   memset(&buf[0], 0, sizeof(buf)); //flushing buffer
 
   //read all header
@@ -88,7 +94,6 @@ void handle_request(int fd)
     memset(&buf[0], 0, sizeof(buf)); //flushing buffer
     Rio_readlineb(&rio, buf, MAXLINE);
   }
-  printf("test\n");
   make_header(line);
   print_headers();
   free_line_header(line, root);
@@ -174,11 +179,37 @@ void parse_line(request_line* line, char* buf)
   char method[10];
   char uri[1500];
   char version[100];
+  char *host_start;
+  char *path_start;
   //TODO: fix for error handling
+  /*
   sscanf(buf, "%s %s %s\n", line->method, line->uri, line->version);
   strcpy(method, line->method);
   strcpy(uri, line->uri);
   strcpy(version, line->version);
+  */
+  sscanf(buf, "%s %s %s\n", method, uri, version);
+  strcpy(line->method, method);
+  strcpy(line->uri, uri);
+  strcpy(line->version, version);
+
+  // URL to hostname && path
+  host_start = strstr(uri, "http://");
+  if(!host_start) {
+    //no hostname
+    return;
+  }
+  host_start += 7;
+  path_start = strstr(host_start, "/");
+  if(!path_start) {
+    //no path -> add default path '/'
+    strcpy(line->hostname, path_start);
+    strcpy(line->path, "/");
+  } else {
+    //URL has hostname && path
+    memcpy(line->hostname, host_start, sizeof(path_start-host_start)); //strcpy_s is only for windows
+    strcpy(line->path, path_start);
+  }
 
   if(strcmp("GET", method) !=0){
     printf("Only GET method can be accepted\n");
@@ -194,10 +225,10 @@ void parse_header(request_header* header, char *buf)
   printf("enter parse_header\n");
   printf("buf : %s\n",buf);
 
-    char* name= strstr(buf, ": ");
-    char* data= strstr(buf, "\r\n");
-    request_header* last=NULL;
-    //TODO: handling error during memcpy, ex. HOST:::::123
+  char* name= strstr(buf, ": ");
+  char* data= strstr(buf, "\r\n");
+  request_header* last=NULL;
+  //TODO: handling error during memcpy, ex. HOST:::::123
     memcpy(header->name, buf, name-buf);
     memcpy(header->data, name+2, data-name-2);
     header->next= NULL;
@@ -239,6 +270,15 @@ void print_headers() {
   }
   printf("=====print_headers end======\n");
   printf("\n");
+}
+void print_line(request_line* line){
+  printf("=====print_line start====\n");
+  printf("method: %s\n", line->method);
+  printf("uri: %s\n", line->uri);
+  printf("hostname: %s\n", line->hostname);
+  printf("path: %s\n",line->path);
+  printf("version: %s\n", line->version);
+  printf("=====print_line end======\n");
 }
 void free_line_header(request_line* line, request_header* root) {
   //free header
