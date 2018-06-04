@@ -8,11 +8,11 @@
 
 typedef struct
 {
-  char method[MAXLINE];
-  char uri[MAXLINE];
-  char hostname[MAXLINE];
-  char path[MAXLINE];
-  char version[MAXLINE];
+  char method[10];
+  char uri[200];
+  char hostname[200];
+  char path[1000];
+  char version[200];
 } request_line;
 typedef struct
 {
@@ -22,11 +22,11 @@ typedef struct
 } request_header;
 
 /* You won't lose style points for including this long line in your code */
-static const char *user_agent_hdr = "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 Firefox/10.0.3\r\n";
+static const char *user_agent_hdr = "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 Firefox/10.0.3";
 static request_header *root= NULL;
 void handle_request(int);
 void parse_line(request_line *, char*);
-void parse_header(request_header *, char*);
+void parse_header(request_header *, char*, request_line*);//todo remove request_line*
 request_header* last_header();
 void print_headers();
 void insert_header(request_header*);
@@ -78,23 +78,26 @@ void handle_request(int fd)
   Rio_readinitb(&rio, fd);
   //read line
   n = Rio_readlineb(&rio, buf, MAXLINE); //printf("server received %d bytes\n", n);
-  printf("line test\n");
   parse_line(line, buf);
-  printf("line test\n");
   print_line(line);
   memset(&buf[0], 0, sizeof(buf)); //flushing buffer
 
   //read all header
   Rio_readlineb(&rio, buf, MAXLINE);
+  print_line(line);
   while(strcmp(buf, "\r\n"))
   {
     printf("while buf : %s\n", buf);
-    request_header* header=malloc(sizeof(header));
-    parse_header(header, buf);
+    parse_header(NULL, buf, line);
+    print_line(line);
     memset(&buf[0], 0, sizeof(buf)); //flushing buffer
     Rio_readlineb(&rio, buf, MAXLINE);
   }
+    memset(&buf[0], 0, sizeof(buf)); //flushing buffer
+  print_line(line);
   make_header(line);
+  printf("/////////////final state/////////////\n");
+  print_line(line);
   print_headers();
   free_line_header(line, root);
   return;
@@ -107,7 +110,7 @@ void make_header(request_line* line)
   if(!temp){
     request_header* new_header=malloc(sizeof(request_header*));
     strcpy(new_header->name, "Host");
-    strcpy(new_header->data, line->uri);//TODO: URI로부터 host추출하기
+    strcpy(new_header->data, line->hostname);//TODO: URI로부터 host추출하기
     insert_header(new_header);
     temp=NULL;
   }
@@ -167,17 +170,20 @@ void insert_header(request_header *header) {
   request_header* last=NULL;
   if(!root) {
     root = header;
+    header->next = NULL;
   }else {
     last = last_header();
     last->next = header;
+    header->next = NULL;
   }
 }
 
 
 void parse_line(request_line* line, char* buf)
 {
+  printf("enter into parse line\n");
   char method[10];
-  char uri[1500];
+  char uri[300];
   char version[100];
   char *host_start;
   char *path_start;
@@ -207,7 +213,7 @@ void parse_line(request_line* line, char* buf)
     strcpy(line->path, "/");
   } else {
     //URL has hostname && path
-    memcpy(line->hostname, host_start, sizeof(path_start-host_start)); //strcpy_s is only for windows
+    memcpy(line->hostname, host_start, path_start-host_start); //strcpy_s is only for windows
     strcpy(line->path, path_start);
   }
 
@@ -220,34 +226,25 @@ void parse_line(request_line* line, char* buf)
   //buf: GET http://www.example.com HTTP/1.0
 }
 
-void parse_header(request_header* header, char *buf)
+void parse_header(request_header* nouse, char *buf, request_line* line)
 {
-  printf("enter parse_header\n");
-  printf("buf : %s\n",buf);
-
-  char* name= strstr(buf, ": ");
-  char* data= strstr(buf, "\r\n");
+  request_header* header = malloc(sizeof(request_header));
+  char* pname= strstr(buf, ": ");
+  char* pdata= strstr(buf, "\r\n");
   request_header* last=NULL;
   //TODO: handling error during memcpy, ex. HOST:::::123
-    memcpy(header->name, buf, name-buf);
-    memcpy(header->data, name+2, data-name-2);
-    header->next= NULL;
-    if((!name)||(!data))
+    memcpy(header->name, buf, pname-buf);
+    print_line(line);
+  //아래줄을 실행하면 line의 uri가 깨지는 버그가 있다..
+   memcpy(header->data, pname+2, pdata-pname-2);
+    print_line(line);
+    if((!pname)||(!pdata))
     {
       //bad header format
       printf("bad header format error\n");
     }
     insert_header(header);
-/*
-    if(!root) {
-      root = header;
-    } else {
-      last = last_header();
-      last->next = header;
-    }
-    */
   printf("name: %s data: %s\n", header->name, header->data);
-  free(last);
 }
 
 request_header* last_header() {
