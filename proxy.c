@@ -120,12 +120,9 @@ void send_request(request_line* line)
 
   //find domain
   if(strlen(line->hostname)) {
-    printf("line->hostname\n");
-    printf("line->hostname: %s\n", line->hostname);
     strcpy(request_domain, line->hostname);
   }
   else if((header = find_in_header("Host")) != NULL) {
-    printf("use find_in_header\n");
     strcpy(request_domain, header->data);
   }
   else {
@@ -135,10 +132,8 @@ void send_request(request_line* line)
   }
   pport = strstr(request_domain, ":");
   if(pport){
-    printf("pport: %s\n", pport);
     *pport = '\0'; // remove port(e.g :8080) in domain
     pport = (pport+1);
-    printf("pport: %s\n", pport);
     strcpy(request_port, pport);
   }else {
     strcpy(request_port, default_port);
@@ -166,6 +161,7 @@ void send_request(request_line* line)
   strcat(request_buf, "\r\n");
   //send request
   Rio_writen(requestfd, request_buf, strlen(request_buf));
+  printf("Rio_writen end\n");
 }
 void make_header(request_line* line)
 {
