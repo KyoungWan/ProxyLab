@@ -36,6 +36,7 @@ void send_request(request_line*);
 void make_header(request_line*);
 void free_line_header(request_line*, request_header*);
 char* xstrncpy(char *, const char*, size_t);
+request_header* find_in_header(char*);
 
 int main(int argc, char **argv)
 
@@ -115,31 +116,40 @@ void send_request(request_line* line)
   char request_domain[200];
   int requestfd;
   char request_buf[10000];
-  request_header *header;
+  request_header* header;
 
-  strcpy(request_domain, line->hostname); //TODO: line->hostname 이전에 header내부들을 먼저봐야한다.
+  //find domain
+  if(strlen(line->hostname)) {
+    printf("line->hostname\n");
+    printf("line->hostname: %s\n", line->hostname);
+    strcpy(request_domain, line->hostname);
+  }
+  else if((header = find_in_header("Host")) != NULL) {
+    printf("use find_in_header\n");
+    strcpy(request_domain, header->data);
+  }
+  else {
+    //host가 주어지지 않은경우
+    printf("error occur: host not found\n");
+    return;
+  }
   pport = strstr(request_domain, ":");
   if(pport){
     printf("pport: %s\n", pport);
     *pport = '\0'; // remove port(e.g :8080) in domain
     pport = (pport+1);
     printf("pport: %s\n", pport);
-    //request_port= (char)(temp);
-    //request_port= *temp;
-    //printf("request_port: %c\n", request_port);
-    //*pport = '\0';
     strcpy(request_port, pport);
   }else {
     strcpy(request_port, default_port);
   }
   //open request file descriptor
-  //printf("request_domain: %s, request_port %s\n", request_domain, pport);
   printf("request_domain: %s, request_port %s\n", request_domain, request_port);
   requestfd= Open_clientfd(request_domain, request_port);
   printf("test\n");
 
   //make request
-  strcat(request_buf, line->method);
+  strcat(request_buf, "http://");
   strcat(request_buf, " ");
   strcat(request_buf, line->path);
   strcat(request_buf, " ");
@@ -226,6 +236,16 @@ void insert_header(request_header *header) {
     last->next = header;
     header->next = NULL;
   }
+}
+request_header* find_in_header(char* name)
+{
+  request_header* temp;
+  temp = root;
+  while(temp) {
+    if(strcmp(temp->name, name)==0) return temp;
+    else temp = temp->next;
+  }
+  return NULL;
 }
 
 
