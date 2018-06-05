@@ -24,7 +24,7 @@ typedef struct request_header
 /* You won't lose style points for including this long line in your code */
 static const char *user_agent_hdr = "Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 Firefox/10.0.3";
 static request_header *root= NULL;
-void handle_request(int);
+void *handle_request(void*);
 void parse_line(request_line *, char*);
 void parse_header(char*, request_line*);//todo remove request_line*
 request_header* last_header();
@@ -43,11 +43,12 @@ int main(int argc, char **argv)
 
 {
   char *port;
-  int listenfd, connfd;
+  int listenfd, *connfd;
   socklen_t clientlen;
   struct sockaddr_in clientaddr;
   struct hostent *hp;
   char *haddrp;
+  pthread_t tid;
     printf("%s", user_agent_hdr);
 
   //show usage error message
@@ -62,31 +63,31 @@ int main(int argc, char **argv)
   while(1)
   {
     clientlen = sizeof(clientaddr);
-    connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen); //typedef struct sockaddr SA;
+    connfd = Malloc(sizeof(int));
+    *connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen); //typedef struct sockaddr SA;
+    Pthread_create(&tid, NULL, handle_request, connfd);
 
     /* Determine the domain name and IP adress of the client */
    // hp = Gethostbyaddr((const char*)&clientaddr.sin_addr.s_addr, clientlen, AF_INET);
    // haddrp = inet_ntoa(clientaddr.sin_addr);
    // printf("server connected to %s (%s) \n", hp->h_name, haddrp);
-    handle_request(connfd);
-    //Close(connfd);
-    printf("server closed\n");
+    //handle_request(connfd);
   }
   return 0;
 }
 
-void handle_request(int fd)
+void *handle_request(void* vargp)
 {
-  request_line* line=malloc(sizeof(request_line));
+  int fd = *((int*)vargp);
+  request_line* line=Malloc(sizeof(request_line));
   //open rio of client input
   rio_t rio;
   char buf[MAXLINE];
 
   Rio_readinitb(&rio, fd);
   //read line
-  Rio_readlineb(&rio, buf, MAXLINE); //printf("server received %d bytes\n", n);
+  Rio_readlineb(&rio, buf, MAXLINE);
   parse_line(line, buf);
-  print_line(line);
   memset(&buf[0], 0, sizeof(buf)); //flushing buffer
 
   //read all header
@@ -95,7 +96,6 @@ void handle_request(int fd)
   {
     printf("while buf : %s\n", buf);
     parse_header(buf, line);
-    print_line(line);
     memset(&buf[0], 0, sizeof(buf)); //flushing buffer
     Rio_readlineb(&rio, buf, MAXLINE);
   }
@@ -105,12 +105,11 @@ void handle_request(int fd)
   print_line(line);
   print_headers();
   send_request(fd, line);
-  free_line_header(line, root);
+  //free_line_header(line, root); //why... not working?
   return;
 }
 void send_request(int fd, request_line* line)
 {
-  print_line(line);
   char* default_port="80";
   char* pport = NULL;
 
@@ -143,7 +142,6 @@ void send_request(int fd, request_line* line)
   //open request file descriptor
   printf("request_domain: %s, request_port %s\n", request_domain, request_port);
   requestfd= Open_clientfd(request_domain, request_port);
-  printf("test\n");
 
   //make request
   strcat(request_buf, line->method);
@@ -189,7 +187,7 @@ void make_header(request_line* line)
 
   find = find_header_by_key("Host");
   if(!find){
-    request_header* new_header=malloc(sizeof(request_header));
+    request_header* new_header=Malloc(sizeof(request_header));
     strcpy(new_header->name, "Host");
     strcpy(new_header->data, line->hostname);
     insert_header(new_header);
@@ -197,7 +195,7 @@ void make_header(request_line* line)
 
   find= find_header_by_key("User-Agent");
   if(!find){
-    request_header* new_header=malloc(sizeof(request_header));
+    request_header* new_header=Malloc(sizeof(request_header));
     strcpy(new_header->name, "User-Agent");
     strcpy(new_header->data, user_agent_hdr);
     insert_header(new_header);
@@ -205,7 +203,7 @@ void make_header(request_line* line)
 
   find= find_header_by_key("Connection");
   if(!find){
-    request_header* new_header=malloc(sizeof(request_header));
+    request_header* new_header=Malloc(sizeof(request_header));
     strcpy(new_header->name, "Connection");
     strcpy(new_header->data, "close");
     insert_header(new_header);
@@ -213,7 +211,7 @@ void make_header(request_line* line)
 
   find= find_header_by_key("Proxy-Connection");
   if(!find){
-    request_header* new_header=malloc(sizeof(request_header));
+    request_header* new_header=Malloc(sizeof(request_header));
     strcpy(new_header->name, "Proxy-Connection");
     strcpy(new_header->data, "close");
     insert_header(new_header);
@@ -318,7 +316,7 @@ void parse_line(request_line* line, char* buf)
 
 void parse_header(char *buf, request_line* line)
 {
-  request_header* header = malloc(sizeof(request_header));
+  request_header* header = Malloc(sizeof(request_header));
   char* pname= strstr(buf, ": ");
   char* pdata= strstr(buf, "\r\n");
   if((!pname)||(!pdata))
