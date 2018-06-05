@@ -14,7 +14,7 @@ typedef struct
   char path[1000];
   char version[200];
 } request_line;
-typedef struct
+typedef struct request_header
 {
   char name[MAXLINE];
   char data[MAXLINE];
@@ -34,12 +34,15 @@ int find_header_by_key(char*);
 void print_line(request_line*);
 void send_request(request_line*);
 void make_header(request_line*);
+void free_line_header(request_line*, request_header*);
+char* xstrncpy(char *, const char*, size_t);
 
 int main(int argc, char **argv)
 
 {
   char *port;
-  int listenfd, connfd, clientlen;
+  int listenfd, connfd;
+  socklen_t clientlen;
   struct sockaddr_in clientaddr;
   struct hostent *hp;
   char *haddrp;
@@ -75,11 +78,10 @@ void handle_request(int fd)
   //open rio of client input
   rio_t rio;
   char buf[MAXLINE];
-  size_t n;
 
   Rio_readinitb(&rio, fd);
   //read line
-  n = Rio_readlineb(&rio, buf, MAXLINE); //printf("server received %d bytes\n", n);
+  Rio_readlineb(&rio, buf, MAXLINE); //printf("server received %d bytes\n", n);
   parse_line(line, buf);
   print_line(line);
   memset(&buf[0], 0, sizeof(buf)); //flushing buffer
@@ -106,22 +108,35 @@ void handle_request(int fd)
 void send_request(request_line* line)
 {
   print_line(line);
-  int request_port=80;
-  char request_domain[200];
+  char* default_port="80";
   char* pport = NULL;
+
+  char request_port[200];
+  char request_domain[200];
   int requestfd;
   char request_buf[10000];
   request_header *header;
 
-  strcpy(request_domain, line->hostname);
+  strcpy(request_domain, line->hostname); //TODO: line->hostname 이전에 header내부들을 먼저봐야한다.
   pport = strstr(request_domain, ":");
   if(pport){
-    request_port= atoi(pport+1);
-    *pport = "\0";
+    printf("pport: %s\n", pport);
+    *pport = '\0'; // remove port(e.g :8080) in domain
+    pport = (pport+1);
+    printf("pport: %s\n", pport);
+    //request_port= (char)(temp);
+    //request_port= *temp;
+    //printf("request_port: %c\n", request_port);
+    //*pport = '\0';
+    strcpy(request_port, pport);
+  }else {
+    strcpy(request_port, default_port);
   }
   //open request file descriptor
-  printf("request_domain: %s, request_port %d\n", request_domain, request_port);
-  requestfd= Open_clientfd(request_domain, &request_port);
+  //printf("request_domain: %s, request_port %s\n", request_domain, pport);
+  printf("request_domain: %s, request_port %s\n", request_domain, request_port);
+  requestfd= Open_clientfd(request_domain, request_port);
+  printf("test\n");
 
   //make request
   strcat(request_buf, line->method);
@@ -144,7 +159,6 @@ void send_request(request_line* line)
 }
 void make_header(request_line* line)
 {
-  request_header* temp=NULL;
   int find=0;
 
   find = find_header_by_key("Host");
@@ -245,12 +259,14 @@ void parse_line(request_line* line, char* buf)
   path_start = strstr(host_start, "/");
   if(!path_start) {
     //no path -> add default path '/'
-    strcpy(line->hostname, path_start);
+    strcpy(line->hostname, host_start);
     strcpy(line->path, "/");
   } else {
     //URL has hostname && path
     //memcpy(line->hostname, host_start, path_start-host_start); //strcpy_s is only for windows
-    strncpy(line->hostname, host_start, path_start-host_start); //strcpy_s is only for windows
+    //strncpy(line->hostname, host_start, path_start-host_start); //strcpy_s is only for windows
+    xstrncpy(line->hostname, host_start, path_start-host_start); //strcpy_s is only for windows
+    printf("hostname test: %s\n", line->hostname);
     strcpy(line->path, path_start);
   }
 
@@ -275,19 +291,18 @@ void parse_header(char *buf, request_line* line)
     printf("bad header format error\n");
     return;
   }
-  request_header* last=NULL;
   //TODO: handling error during memcpy, ex. HOST:::::123
   //memcpy(header->name, buf, pname-buf);
-  strncpy(header->name, buf, pname-buf);
+  xstrncpy(header->name, buf, pname-buf);
   //아래줄을 실행하면 line의 uri가 깨지는 버그가 있다..
   //memcpy(header->data, pname+2, pdata-pname-2);
-  strncpy(header->data, pname+2, pdata-pname-2);
+  xstrncpy(header->data, pname+2, pdata-pname-2);
   insert_header(header);
   printf("name: %s data: %s\n", header->name, header->data);
 }
 
 request_header* last_header() {
-  request_header* temp = malloc(sizeof(request_header*));
+  request_header* temp;
   temp = root;
   while(temp && temp->next){
     temp = temp ->next;
@@ -331,4 +346,10 @@ void free_line_header(request_line* line, request_header* root) {
   }
   //free line
   free(line);
+}
+//wrapper for safe strncpy
+char* xstrncpy(char *dst, const char *src, size_t n)
+{
+    dst[0] = '\0';
+      return strncat(dst, src, n );
 }
