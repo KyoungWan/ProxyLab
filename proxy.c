@@ -22,7 +22,7 @@ typedef struct request_header
 } request_header;
 
 /* You won't lose style points for including this long line in your code */
-static const char *user_agent_hdr = "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 Firefox/10.0.3";
+static const char *user_agent_hdr = "Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 Firefox/10.0.3";
 static request_header *root= NULL;
 void handle_request(int);
 void parse_line(request_line *, char*);
@@ -32,11 +32,12 @@ void print_headers();
 void insert_header(request_header*);
 int find_header_by_key(char*);
 void print_line(request_line*);
-void send_request(request_line*);
+void send_request(int, request_line*);
 void make_header(request_line*);
 void free_line_header(request_line*, request_header*);
 char* xstrncpy(char *, const char*, size_t);
 request_header* find_in_header(char*);
+void print_request(char []);
 
 int main(int argc, char **argv)
 
@@ -64,11 +65,12 @@ int main(int argc, char **argv)
     connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen); //typedef struct sockaddr SA;
 
     /* Determine the domain name and IP adress of the client */
-    hp = Gethostbyaddr((const char*)&clientaddr.sin_addr.s_addr, clientlen, AF_INET);
-    haddrp = inet_ntoa(clientaddr.sin_addr);
-    printf("server connected to %s (%s) \n", hp->h_name, haddrp);
+   // hp = Gethostbyaddr((const char*)&clientaddr.sin_addr.s_addr, clientlen, AF_INET);
+   // haddrp = inet_ntoa(clientaddr.sin_addr);
+   // printf("server connected to %s (%s) \n", hp->h_name, haddrp);
     handle_request(connfd);
-    Close(connfd);
+    //Close(connfd);
+    printf("server closed\n");
   }
   return 0;
 }
@@ -102,11 +104,11 @@ void handle_request(int fd)
   printf("/////////////final state/////////////\n");
   print_line(line);
   print_headers();
-  send_request(line);
+  send_request(fd, line);
   free_line_header(line, root);
   return;
 }
-void send_request(request_line* line)
+void send_request(int fd, request_line* line)
 {
   print_line(line);
   char* default_port="80";
@@ -144,7 +146,7 @@ void send_request(request_line* line)
   printf("test\n");
 
   //make request
-  strcat(request_buf, "http://");
+  strcat(request_buf, line->method);
   strcat(request_buf, " ");
   strcat(request_buf, line->path);
   strcat(request_buf, " ");
@@ -160,8 +162,26 @@ void send_request(request_line* line)
   }
   strcat(request_buf, "\r\n");
   //send request
+  print_request(request_buf);
   Rio_writen(requestfd, request_buf, strlen(request_buf));
+  //recieve response
+  rio_t rio;
+  char read_buf[MAXLINE];
+  ssize_t n=0;
+  Rio_readinitb(&rio, requestfd);
+  while((n = Rio_readnb(&rio, read_buf, MAXLINE))>0) //cannot use lineb cause interface of Rio_writen
+  {
+    //write to client of proxy
+    Rio_writen(fd, read_buf, (size_t)n);
+  }
   printf("Rio_writen end\n");
+  Close(requestfd);
+  Close(fd);
+
+}
+void print_request(char requestbuf[]){
+  printf("=====print_request=====\n");
+    puts(requestbuf);
 }
 void make_header(request_line* line)
 {
