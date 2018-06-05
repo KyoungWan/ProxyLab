@@ -21,6 +21,19 @@ typedef struct request_header
   struct request_header* next;
 } request_header;
 
+typedef struct cache_node
+{
+  char hostname[200];
+  char path[1000];
+  size_t size;
+  char* data;
+  struct cache_node* next;
+  clock_t used;
+} cache_node;
+
+cache_node* root_c;
+int cache_volume=0;
+
 /* You won't lose style points for including this long line in your code */
 static const char *user_agent_hdr = "Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 Firefox/10.0.3";
 static request_header *root= NULL;
@@ -30,7 +43,7 @@ void parse_header(char*, request_line*);//todo remove request_line*
 request_header* last_header();
 void print_headers();
 void insert_header(request_header*);
-int find_header_by_key(char*);
+request_header* find_header_by_key(char*);
 void print_line(request_line*);
 void send_request(int, request_line*);
 void make_header(request_line*);
@@ -38,6 +51,11 @@ void free_line_header(request_line*, request_header*);
 char* xstrncpy(char *, const char*, size_t);
 request_header* find_in_header(char*);
 void print_request(char []);
+void initialize_cache();
+void delete_cache(cache_node*);
+void update_time(cache_node*);
+cache_node* search_cache(char [], char []);
+void print_cache();
 
 int main(int argc, char **argv)
 
@@ -46,16 +64,17 @@ int main(int argc, char **argv)
   int listenfd, *connfd;
   socklen_t clientlen;
   struct sockaddr_in clientaddr;
-  struct hostent *hp;
-  char *haddrp;
   pthread_t tid;
-    printf("%s", user_agent_hdr);
+  printf("%s", user_agent_hdr);
 
   //show usage error message
   if (argc != 2)
   {
     printf("Usage: ./proxy <port_number>\n");
   }
+  //initialize cache
+  root_c = malloc(sizeof(cache_node));
+  initialize_cache();
   port  = argv[1];
   printf("port :%s\n", port);
   listenfd = Open_listenfd(port); //Open_listenfd => socket(), bind(), listen()
@@ -66,19 +85,24 @@ int main(int argc, char **argv)
     connfd = Malloc(sizeof(int));
     *connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen); //typedef struct sockaddr SA;
     Pthread_create(&tid, NULL, handle_request, connfd);
-
-    /* Determine the domain name and IP adress of the client */
-   // hp = Gethostbyaddr((const char*)&clientaddr.sin_addr.s_addr, clientlen, AF_INET);
-   // haddrp = inet_ntoa(clientaddr.sin_addr);
-   // printf("server connected to %s (%s) \n", hp->h_name, haddrp);
-    //handle_request(connfd);
   }
   return 0;
+}
+
+void initialize_cache() {
+  strcpy(root_c->hostname, "");
+  strcpy(root_c->path, "");
+  root_c->size= 0;
+  root_c->data= NULL;
+  root_c->next = NULL;
+  root_c->used= clock();
 }
 
 void *handle_request(void* vargp)
 {
   int fd = *((int*)vargp);
+  free(vargp);
+  Pthread_detach(pthread_self());
   request_line* line=Malloc(sizeof(request_line));
   //open rio of client input
   rio_t rio;
@@ -106,8 +130,91 @@ void *handle_request(void* vargp)
   print_headers();
   send_request(fd, line);
   //free_line_header(line, root); //why... not working?
+  return NULL;
+}
+
+/*
+   cache_node* search_cache(request_buf);
+   if(cache_node) {
+//Rio_writen(fd, );
+}
+*/
+cache_node* search_cache(char path[], char hostname[])
+{
+  printf("search_cache entered\n");
+  printf("input// path: %s, hostname: %s\n", path, hostname);
+  cache_node* temp = root_c;
+  while(temp!= NULL)
+  {
+    printf("temp// path: %s, hostname: %s\n", temp->path, temp->hostname);
+    if(strcmp(path, temp-> path) == 0){
+      if(strcmp(hostname, temp-> hostname) == 0){
+        printf("search_cache success!!!!!!!!!!!!!!!\n");
+        return temp;
+      }
+    }
+    temp = temp->next;
+  }
+  return NULL;
+}
+cache_node* create_cache() {
+  cache_node* temp = root_c;
+  cache_node* target;
+  //go to next most
+  while(temp -> next !=NULL){
+    temp = temp->next;
+  }
+  target =malloc(sizeof(cache_node));
+  temp->next = target;
+  target->next = NULL;
+  return target;
+  /*
+     while(root_c -> next != NULL)
+     {
+     root_c = root_c ->next;
+     }
+     root_c ->next = malloc(sizeof(cache_node));
+  root_c ->next ->next = NULL;
+  return root_c ->next;
+  */
+}
+
+void update_time(cache_node* target)
+{
+  target->used = clock();
   return;
 }
+cache_node* LRU() {
+  cache_node* temp = root_c;
+  temp = temp->next;
+  cache_node* eviction = temp;
+  clock_t least = temp -> used;
+  while(temp){
+    if(least > temp->used){
+      least = temp->used;
+      eviction = temp;
+    }
+    temp = temp->next;
+  }
+  return eviction;
+}
+
+void delete_cache(cache_node* eviction) {
+  cache_node* temp = root_c;
+  if(!eviction) return;
+  if(!temp) return;
+  while((temp->next != eviction) && (temp)){
+    temp = temp->next;
+  }
+  if(!temp) return;
+  temp->next = eviction ->next;
+  cache_volume -= (eviction->size);
+  free(eviction->data);
+  free(eviction);
+  return;
+}
+
+
 void send_request(int fd, request_line* line)
 {
   char* default_port="80";
@@ -139,9 +246,6 @@ void send_request(int fd, request_line* line)
   }else {
     strcpy(request_port, default_port);
   }
-  //open request file descriptor
-  printf("request_domain: %s, request_port %s\n", request_domain, request_port);
-  requestfd= Open_clientfd(request_domain, request_port);
 
   //make request
   strcat(request_buf, line->method);
@@ -161,29 +265,96 @@ void send_request(int fd, request_line* line)
   strcat(request_buf, "\r\n");
   //send request
   print_request(request_buf);
+  printf("request_domain: %s, request_port %s\n", request_domain, request_port);
+
+  request_header* header_host= find_header_by_key("Host");
+  //search cashe
+  cache_node* pcached= search_cache(line->path, header_host->data); //path && host 
+  if(pcached) {
+    printf("pcached is active!\n");
+    Rio_writen(fd, pcached->data, pcached->size);
+    update_time(pcached);
+    Close(fd);
+    return;
+  }
+
+  //open request file descriptor
+  requestfd= Open_clientfd(request_domain, request_port);
+
   Rio_writen(requestfd, request_buf, strlen(request_buf));
   //recieve response
   rio_t rio;
   char read_buf[MAXLINE];
   ssize_t n=0;
+  // caching
+  char cache_candidate[MAX_OBJECT_SIZE];
+  char *cache_ptr = cache_candidate;
+  int cachable=1;
   Rio_readinitb(&rio, requestfd);
   while((n = Rio_readnb(&rio, read_buf, MAXLINE))>0) //cannot use lineb cause interface of Rio_writen
   {
     //write to client of proxy
     Rio_writen(fd, read_buf, (size_t)n);
+    if(cachable)
+    {
+      if((n+(cache_ptr-cache_candidate)) <= MAX_OBJECT_SIZE){
+        memcpy(cache_ptr, read_buf, n); //TODO change it to xstrncpy
+        cache_ptr += n;
+      }
+      else {
+        cachable=0;
+      }
+    }
+  }
+  printf("cachable : %d\n", cachable);
+  //do caching
+  if(cachable) {
+    int current_size= cache_ptr - cache_candidate;
+    if((cache_volume + current_size) <= MAX_CACHE_SIZE){
+      printf("no eviction!\n");
+      // noeviction
+      cache_node* new_cache = create_cache();
+      printf("new_cache %p\n", new_cache);
+      new_cache ->size = current_size;
+      strcpy(new_cache -> hostname, header_host->data);
+      strcpy(new_cache -> path, line->path);
+      new_cache -> data = malloc(current_size);
+      memcpy(new_cache ->data, cache_candidate, current_size);
+      cache_volume += current_size;
+      update_time(new_cache);
+      printf("new_cache data:\n");
+      //printf("hostname: %s, path: %s, data: \n(%s)\n, used: %ld\n", new_cache->hostname, new_cache->path, new_cache->data, new_cache->used);
+      print_cache();
+    }
+    else {
+      printf("eviction occur!\n");
+      //eviction
+      while((cache_volume + current_size > MAX_CACHE_SIZE)){
+        cache_node* eviction = LRU();
+        delete_cache(eviction);
+      }
+      cache_node* new_cache = create_cache();
+      new_cache->size = current_size;
+      strcpy(new_cache -> hostname, header_host->data);
+      strcpy(new_cache -> path, line->path);
+      new_cache -> data = malloc(current_size);
+      memcpy(new_cache->data, cache_candidate, current_size);
+      cache_volume += current_size;
+      update_time(new_cache);
+    }
   }
   printf("Rio_writen end\n");
   Close(requestfd);
   Close(fd);
-
 }
+
 void print_request(char requestbuf[]){
   printf("=====print_request=====\n");
-    puts(requestbuf);
+  puts(requestbuf);
 }
 void make_header(request_line* line)
 {
-  int find=0;
+  request_header* find=NULL;
 
   find = find_header_by_key("Host");
   if(!find){
@@ -192,6 +363,7 @@ void make_header(request_line* line)
     strcpy(new_header->data, line->hostname);
     insert_header(new_header);
   }
+  find = NULL;
 
   find= find_header_by_key("User-Agent");
   if(!find){
@@ -200,6 +372,7 @@ void make_header(request_line* line)
     strcpy(new_header->data, user_agent_hdr);
     insert_header(new_header);
   }
+  find = NULL;
 
   find= find_header_by_key("Connection");
   if(!find){
@@ -208,6 +381,7 @@ void make_header(request_line* line)
     strcpy(new_header->data, "close");
     insert_header(new_header);
   }
+  find = NULL;
 
   find= find_header_by_key("Proxy-Connection");
   if(!find){
@@ -216,6 +390,7 @@ void make_header(request_line* line)
     strcpy(new_header->data, "close");
     insert_header(new_header);
   }
+  find = NULL;
 
   //1.headers를 돌면서 HOSTㄹ인 헤더ㄹ를 찾아라 찾아서 Host에 넣어주기
   //2.없으면 URi에서 뜯어라
@@ -224,20 +399,20 @@ void make_header(request_line* line)
   //5.Proxy-Connection: close 헤더를 포함해라.
 }
 
-int find_header_by_key(char* type)
+request_header* find_header_by_key(char* type)
 {
   // Host, User-Agent, Connection, Proxy-Connection
-  request_header* temp;
+  request_header* temp= malloc(sizeof(request_header*));
   temp = root;
   while(temp){
     if(strcmp(temp->name, type)==0) {
-      return 1;
+      return temp;
     }
     else {
       temp = temp->next;
     }
   }
-  return 0;
+  return NULL;
 }
 
 void insert_header(request_header *header) {
@@ -273,11 +448,11 @@ void parse_line(request_line* line, char* buf)
   char *path_start;
   //TODO: fix for error handling
   /*
-  sscanf(buf, "%s %s %s\n", line->method, line->uri, line->version);
-  strcpy(method, line->method);
-  strcpy(uri, line->uri);
-  strcpy(version, line->version);
-  */
+     sscanf(buf, "%s %s %s\n", line->method, line->uri, line->version);
+     strcpy(method, line->method);
+     strcpy(uri, line->uri);
+     strcpy(version, line->version);
+     */
   sscanf(buf, "%s %s %s\n", method, uri, version);
   strcpy(line->method, method);
   strcpy(line->uri, uri);
@@ -384,6 +559,21 @@ void free_line_header(request_line* line, request_header* root) {
 //wrapper for safe strncpy
 char* xstrncpy(char *dst, const char *src, size_t n)
 {
-    dst[0] = '\0';
-      return strncat(dst, src, n );
+  dst[0] = '\0';
+  return strncat(dst, src, n );
 }
+void print_cache() {
+  cache_node* temp = root_c;
+  int i=0;
+  printf("=== print_cache start: === \n");
+  while(temp){
+    printf("cache[%d] : \n", i++);
+    printf("hostname: %s\n", temp->hostname);
+    printf("path: %s\n", temp->path);
+    //printf("data: \n(%s)\n", temp->data);
+    printf("used: %ld\n", temp->used);
+    temp = temp -> next;
+  }
+  printf("=== print_cache ended:  === \n");
+}
+
