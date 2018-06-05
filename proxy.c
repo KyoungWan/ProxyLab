@@ -28,18 +28,18 @@ typedef struct cache_node
   size_t size;
   char* data;
   struct cache_node* next;
-  clock_t used;
+  clock_t access_time;
 } cache_node;
+//used cache in LRU, and caching key is hostname && path.
 
 cache_node* root_c;
 int cache_volume=0;
 
-/* You won't lose style points for including this long line in your code */
 static const char *user_agent_hdr = "Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 Firefox/10.0.3";
 static request_header *root= NULL;
 void *handle_request(void*);
 void parse_line(request_line *, char*);
-void parse_header(char*, request_line*);//todo remove request_line*
+void parse_header(char*);
 request_header* last_header();
 void print_headers();
 void insert_header(request_header*);
@@ -49,7 +49,6 @@ void send_request(int, request_line*);
 void make_header(request_line*);
 void free_line_header(request_line*, request_header*);
 char* xstrncpy(char *, const char*, size_t);
-request_header* find_in_header(char*);
 void print_request(char []);
 void initialize_cache();
 void delete_cache(cache_node*);
@@ -94,7 +93,7 @@ void initialize_cache() {
   root_c->size= 0;
   root_c->data= NULL;
   root_c->next = NULL;
-  root_c->used= clock();
+  root_c->access_time= clock();
 }
 
 void *handle_request(void* vargp)
@@ -117,7 +116,7 @@ void *handle_request(void* vargp)
   Rio_readlineb(&rio, buf, MAXLINE);
   while(strcmp(buf, "\r\n"))
   {
-    parse_header(buf, line);
+    parse_header(buf);
     memset(&buf[0], 0, sizeof(buf)); //flushing buffer
     Rio_readlineb(&rio, buf, MAXLINE);
   }
@@ -132,23 +131,21 @@ void *handle_request(void* vargp)
 
 cache_node* search_cache(char path[], char hostname[])
 {
+  //search by path && hostname
   cache_node* temp = root_c;
   while(temp!= NULL)
   {
-    if(strcmp(path, temp-> path) == 0){
-      if(strcmp(hostname, temp-> hostname) == 0){
-        return temp;
-      }
-    }
+    if((strcmp(path, temp-> path) == 0) && (strcmp(hostname, temp-> hostname) == 0)) return temp;
     temp = temp->next;
   }
   return NULL;
 }
 cache_node* create_cache() {
+  //create_cache to the next most of caches
   cache_node* temp = root_c;
   cache_node* target;
   //go to next most
-  while(temp -> next !=NULL){
+  while(temp -> next){
     temp = temp->next;
   }
   target =malloc(sizeof(cache_node));
@@ -159,17 +156,19 @@ cache_node* create_cache() {
 
 void update_time(cache_node* target)
 {
-  target->used = clock();
+  //update target's access time
+  target->access_time = clock();
   return;
 }
 cache_node* LRU() {
+  //Least Recently Used
   cache_node* temp = root_c;
   temp = temp->next;
   cache_node* eviction = temp;
-  clock_t least = temp -> used;
+  clock_t least = temp -> access_time;
   while(temp){
-    if(least > temp->used){
-      least = temp->used;
+    if(least > temp->access_time){
+      least = temp->access_time;
       eviction = temp;
     }
     temp = temp->next;
@@ -178,10 +177,11 @@ cache_node* LRU() {
 }
 
 void delete_cache(cache_node* eviction) {
+  //delete eviction cache
   cache_node* temp = root_c;
   if(!eviction) return;
   if(!temp) return;
-  while((temp->next != eviction) && (temp)){
+  while((temp->next != eviction) && temp){
     temp = temp->next;
   }
   if(!temp) return;
@@ -208,7 +208,7 @@ void send_request(int fd, request_line* line)
   if(strlen(line->hostname)) {
     strcpy(request_domain, line->hostname);
   }
-  else if((header = find_in_header("Host")) != NULL) {
+  else if((header = find_header_by_key("Host")) != NULL) {
     strcpy(request_domain, header->data);
   }
   else {
@@ -241,15 +241,13 @@ void send_request(int fd, request_line* line)
     header = header->next;
   }
   strcat(request_buf, "\r\n");
-  //send request
-  //print_request(request_buf);
 
   request_header* header_host= find_header_by_key("Host");
-  //search cashe
-  cache_node* pcached= search_cache(line->path, header_host->data); //path && host 
-  if(pcached) {
-    Rio_writen(fd, pcached->data, pcached->size);
-    update_time(pcached);
+  //search whether there is available cache
+  cache_node* target= search_cache(line->path, header_host->data); //path && host 
+  if(target) {
+    Rio_writen(fd, target->data, target->size);
+    update_time(target);
     Close(fd);
     return;
   }
@@ -257,6 +255,7 @@ void send_request(int fd, request_line* line)
   //open request file descriptor
   requestfd= Open_clientfd(request_domain, request_port);
 
+  //send request
   Rio_writen(requestfd, request_buf, strlen(request_buf));
   //recieve response
   rio_t rio;
@@ -285,42 +284,28 @@ void send_request(int fd, request_line* line)
   //do caching
   if(cachable) {
     int current_size= cache_ptr - cache_candidate;
-    if((cache_volume + current_size) <= MAX_CACHE_SIZE){
-      // noeviction
-      cache_node* new_cache = create_cache();
-      new_cache ->size = current_size;
-      strcpy(new_cache -> hostname, header_host->data);
-      strcpy(new_cache -> path, line->path);
-      new_cache -> data = malloc(current_size);
-      xstrncpy(new_cache ->data, cache_candidate, current_size);
-      cache_volume += current_size;
-      update_time(new_cache);
-      //print_cache();
-    }
-    else {
-      //eviction
+    if((cache_volume + current_size) >  MAX_CACHE_SIZE){
+      //over cache_volume => eviction
       while((cache_volume + current_size > MAX_CACHE_SIZE)){
         cache_node* eviction = LRU();
         delete_cache(eviction);
       }
-      cache_node* new_cache = create_cache();
-      new_cache->size = current_size;
-      strcpy(new_cache -> hostname, header_host->data);
-      strcpy(new_cache -> path, line->path);
-      new_cache -> data = malloc(current_size);
-      xstrncpy(new_cache->data, cache_candidate, current_size);
-      cache_volume += current_size;
-      update_time(new_cache);
     }
+    //cache insertion
+    cache_node* new_cache = create_cache();
+    new_cache ->size = current_size;
+    strcpy(new_cache -> hostname, header_host->data);
+    strcpy(new_cache -> path, line->path);
+    new_cache -> data = malloc(current_size);
+    xstrncpy(new_cache ->data, cache_candidate, current_size);
+    cache_volume += current_size;
+    update_time(new_cache);
+    //print_cache();
   }
   Close(requestfd);
   Close(fd);
 }
 
-void print_request(char requestbuf[]){
-  printf("=====print_request=====\n");
-  puts(requestbuf);
-}
 void make_header(request_line* line)
 {
   request_header* find=NULL;
@@ -360,18 +345,12 @@ void make_header(request_line* line)
     insert_header(new_header);
   }
   find = NULL;
-
-  //1.headers를 돌면서 HOSTㄹ인 헤더ㄹ를 찾아라 찾아서 Host에 넣어주기
-  //2.없으면 URi에서 뜯어라
-  //3.single line으로 USer-Agent header 보내주기
-  //4.Connection: close
-  //5.Proxy-Connection: close 헤더를 포함해라.
 }
 
 request_header* find_header_by_key(char* type)
 {
-  // Host, User-Agent, Connection, Proxy-Connection
-  request_header* temp= malloc(sizeof(request_header*));
+  // type can be => Host, User-Agent, Connection, Proxy-Connection
+  request_header* temp; 
   temp = root;
   while(temp){
     if(strcmp(temp->name, type)==0) {
@@ -395,17 +374,6 @@ void insert_header(request_header *header) {
     header->next = NULL;
   }
 }
-request_header* find_in_header(char* name)
-{
-  request_header* temp;
-  temp = root;
-  while(temp) {
-    if(strcmp(temp->name, name)==0) return temp;
-    else temp = temp->next;
-  }
-  return NULL;
-}
-
 
 void parse_line(request_line* line, char* buf)
 {
@@ -442,7 +410,7 @@ void parse_line(request_line* line, char* buf)
   //buf: GET http://www.example.com HTTP/1.0
 }
 
-void parse_header(char *buf, request_line* line)
+void parse_header(char *buf)
 {
   request_header* header = Malloc(sizeof(request_header));
   char* pname= strstr(buf, ": ");
@@ -465,6 +433,11 @@ request_header* last_header() {
     temp = temp ->next;
   }
   return temp;
+}
+////////////////////////////////////////////////functions for printing/////////////////////////////////////////
+void print_request(char requestbuf[]){
+  printf("=====print_request=====\n");
+  puts(requestbuf);
 }
 
 void print_headers() {
@@ -519,7 +492,7 @@ void print_cache() {
     printf("hostname: %s\n", temp->hostname);
     printf("path: %s\n", temp->path);
     //printf("data: \n(%s)\n", temp->data);
-    printf("used: %ld\n", temp->used);
+    printf("access_time: %ld\n", temp->access_time);
     temp = temp -> next;
   }
   printf("=== print_cache ended:  === \n");
