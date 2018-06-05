@@ -76,7 +76,6 @@ int main(int argc, char **argv)
   root_c = malloc(sizeof(cache_node));
   initialize_cache();
   port  = argv[1];
-  printf("port :%s\n", port);
   listenfd = Open_listenfd(port); //Open_listenfd => socket(), bind(), listen()
 
   while(1)
@@ -118,38 +117,26 @@ void *handle_request(void* vargp)
   Rio_readlineb(&rio, buf, MAXLINE);
   while(strcmp(buf, "\r\n"))
   {
-    printf("while buf : %s\n", buf);
     parse_header(buf, line);
     memset(&buf[0], 0, sizeof(buf)); //flushing buffer
     Rio_readlineb(&rio, buf, MAXLINE);
   }
   memset(&buf[0], 0, sizeof(buf)); //flushing buffer
   make_header(line);
-  printf("/////////////final state/////////////\n");
-  print_line(line);
-  print_headers();
+  //print_line(line);
+  //print_headers();
   send_request(fd, line);
   //free_line_header(line, root); //why... not working?
   return NULL;
 }
 
-/*
-   cache_node* search_cache(request_buf);
-   if(cache_node) {
-//Rio_writen(fd, );
-}
-*/
 cache_node* search_cache(char path[], char hostname[])
 {
-  printf("search_cache entered\n");
-  printf("input// path: %s, hostname: %s\n", path, hostname);
   cache_node* temp = root_c;
   while(temp!= NULL)
   {
-    printf("temp// path: %s, hostname: %s\n", temp->path, temp->hostname);
     if(strcmp(path, temp-> path) == 0){
       if(strcmp(hostname, temp-> hostname) == 0){
-        printf("search_cache success!!!!!!!!!!!!!!!\n");
         return temp;
       }
     }
@@ -168,15 +155,6 @@ cache_node* create_cache() {
   temp->next = target;
   target->next = NULL;
   return target;
-  /*
-     while(root_c -> next != NULL)
-     {
-     root_c = root_c ->next;
-     }
-     root_c ->next = malloc(sizeof(cache_node));
-  root_c ->next ->next = NULL;
-  return root_c ->next;
-  */
 }
 
 void update_time(cache_node* target)
@@ -264,14 +242,12 @@ void send_request(int fd, request_line* line)
   }
   strcat(request_buf, "\r\n");
   //send request
-  print_request(request_buf);
-  printf("request_domain: %s, request_port %s\n", request_domain, request_port);
+  //print_request(request_buf);
 
   request_header* header_host= find_header_by_key("Host");
   //search cashe
   cache_node* pcached= search_cache(line->path, header_host->data); //path && host 
   if(pcached) {
-    printf("pcached is active!\n");
     Rio_writen(fd, pcached->data, pcached->size);
     update_time(pcached);
     Close(fd);
@@ -298,7 +274,7 @@ void send_request(int fd, request_line* line)
     if(cachable)
     {
       if((n+(cache_ptr-cache_candidate)) <= MAX_OBJECT_SIZE){
-        memcpy(cache_ptr, read_buf, n); //TODO change it to xstrncpy
+        xstrncpy(cache_ptr, read_buf, n); 
         cache_ptr += n;
       }
       else {
@@ -306,28 +282,22 @@ void send_request(int fd, request_line* line)
       }
     }
   }
-  printf("cachable : %d\n", cachable);
   //do caching
   if(cachable) {
     int current_size= cache_ptr - cache_candidate;
     if((cache_volume + current_size) <= MAX_CACHE_SIZE){
-      printf("no eviction!\n");
       // noeviction
       cache_node* new_cache = create_cache();
-      printf("new_cache %p\n", new_cache);
       new_cache ->size = current_size;
       strcpy(new_cache -> hostname, header_host->data);
       strcpy(new_cache -> path, line->path);
       new_cache -> data = malloc(current_size);
-      memcpy(new_cache ->data, cache_candidate, current_size);
+      xstrncpy(new_cache ->data, cache_candidate, current_size);
       cache_volume += current_size;
       update_time(new_cache);
-      printf("new_cache data:\n");
-      //printf("hostname: %s, path: %s, data: \n(%s)\n, used: %ld\n", new_cache->hostname, new_cache->path, new_cache->data, new_cache->used);
-      print_cache();
+      //print_cache();
     }
     else {
-      printf("eviction occur!\n");
       //eviction
       while((cache_volume + current_size > MAX_CACHE_SIZE)){
         cache_node* eviction = LRU();
@@ -338,12 +308,11 @@ void send_request(int fd, request_line* line)
       strcpy(new_cache -> hostname, header_host->data);
       strcpy(new_cache -> path, line->path);
       new_cache -> data = malloc(current_size);
-      memcpy(new_cache->data, cache_candidate, current_size);
+      xstrncpy(new_cache->data, cache_candidate, current_size);
       cache_volume += current_size;
       update_time(new_cache);
     }
   }
-  printf("Rio_writen end\n");
   Close(requestfd);
   Close(fd);
 }
@@ -440,19 +409,11 @@ request_header* find_in_header(char* name)
 
 void parse_line(request_line* line, char* buf)
 {
-  printf("enter into parse line\n");
   char method[10];
   char uri[300];
   char version[100];
   char *host_start;
   char *path_start;
-  //TODO: fix for error handling
-  /*
-     sscanf(buf, "%s %s %s\n", line->method, line->uri, line->version);
-     strcpy(method, line->method);
-     strcpy(uri, line->uri);
-     strcpy(version, line->version);
-     */
   sscanf(buf, "%s %s %s\n", method, uri, version);
   strcpy(line->method, method);
   strcpy(line->uri, uri);
@@ -471,21 +432,13 @@ void parse_line(request_line* line, char* buf)
     strcpy(line->hostname, host_start);
     strcpy(line->path, "/");
   } else {
-    //URL has hostname && path
-    //memcpy(line->hostname, host_start, path_start-host_start); //strcpy_s is only for windows
-    //strncpy(line->hostname, host_start, path_start-host_start); //strcpy_s is only for windows
     xstrncpy(line->hostname, host_start, path_start-host_start); //strcpy_s is only for windows
-    printf("hostname test: %s\n", line->hostname);
     strcpy(line->path, path_start);
   }
 
   if(strcmp("GET", method) !=0){
     printf("Only GET method can be accepted\n");
-    return ; //TODO: error handling 
   }
-
-  printf("method: %s uri: %s version: %s\n", line->method, line->uri, line->version);
-  printf("hostname: %s path: %s\n", line->hostname, line->path);
   //buf: GET http://www.example.com HTTP/1.0
 }
 
@@ -500,14 +453,9 @@ void parse_header(char *buf, request_line* line)
     printf("bad header format error\n");
     return;
   }
-  //TODO: handling error during memcpy, ex. HOST:::::123
-  //memcpy(header->name, buf, pname-buf);
   xstrncpy(header->name, buf, pname-buf);
-  //아래줄을 실행하면 line의 uri가 깨지는 버그가 있다..
-  //memcpy(header->data, pname+2, pdata-pname-2);
   xstrncpy(header->data, pname+2, pdata-pname-2);
   insert_header(header);
-  printf("name: %s data: %s\n", header->name, header->data);
 }
 
 request_header* last_header() {
